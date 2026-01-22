@@ -1,6 +1,5 @@
 name: Build WDA IPA
 
-# Запуск вручную (кнопкой) или при изменении кода
 on:
   workflow_dispatch:
   push:
@@ -13,26 +12,43 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup Xcode version
+      - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
 
+      - name: Create Resources Directory
+        # Иногда сборка падает, потому что этой папки нет в git
+        run: mkdir -p WebDriverAgentRunner/Resources/WebDriverAgent.bundle
+
       - name: Build WebDriverAgent
-        # Эта команда собирает проект без подписи (CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO)
+        # Добавляем кучу флагов, чтобы Xcode не ругался на отсутствие подписи и BundleID
         run: |
           xcodebuild build-for-testing \
             -project WebDriverAgent.xcodeproj \
             -scheme WebDriverAgentRunner \
             -destination "generic/platform=iOS" \
             -derivedDataPath build \
-            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            GCC_TREAT_WARNINGS_AS_ERRORS=0 \
+            COMPILER_INDEX_STORE_ENABLE=NO
 
       - name: Package into IPA
+        # Если билд прошел, но с ошибками тестов, .app файл все равно создается
+        # Мы ищем его и упаковываем
         run: |
           mkdir Payload
-          # Ищем, куда xcode положил .app файл (путь может меняться, поэтому используем find)
+          # Ищем папку .app (иногда она лежит в Products/Debug-iphoneos, иногда в другом месте)
           APP_PATH=$(find build/Build/Products -name "WebDriverAgentRunner-Runner.app" | head -n 1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "ОШИБКА: Файл .app не найден! Сборка провалилась совсем."
+            exit 1
+          fi
+          
+          echo "Найден файл: $APP_PATH"
           cp -R "$APP_PATH" Payload/
           zip -r WebDriverAgent.ipa Payload
 
